@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const axios = require('axios');
 const admin = require('firebase-admin');
 const db = admin.firestore();
 
@@ -7,57 +7,60 @@ const db = admin.firestore();
 // @access  Private
 exports.submitData = async (req, res) => {
     try {
-        const { location, nitrogen, potassium, phosphorus, humidity, rainfall } = req.body;
+        const { location, nitrogen, potassium, phosphorus, temperature, humidity, ph, rainfall, moisture, carbon, soil, crop_input } = req.body;
         const userId = req.user.uid;
 
-        const pythonProcess = spawn('python', [
-            'ml_model.py',
-            JSON.stringify({ location, nitrogen, potassium, phosphorus, humidity, rainfall })
-        ]);
+        // The final ML model API endpoint
+        const mlApiUrl = 'https://crop-fertilizer-api.onrender.com/predict';
 
-        let resultData = '';
-        let errorData = '';
+        // Transform the data to match the ML model's expected format
+        const mlData = {
+            N: nitrogen,
+            P: phosphorus,
+            K: potassium,
+            temperature,
+            humidity,
+            ph,
+            rainfall,
+            moisture,
+            carbon,
+            soil,
+            crop_input
+        };
 
-        pythonProcess.stdout.on('data', (data) => {
-            resultData += data.toString();
+        const mlApiResponse = await axios.post(mlApiUrl, mlData);
+        const recommendation = mlApiResponse.data;
+
+        // Add a safety check for undefined values
+        const validRecommendation = {
+            recommended_crop: recommendation.crop || 'Unknown',
+            recommended_fertilizer_type: (recommendation.fertilizer && recommendation.fertilizer['fertilizer-type']) || 'Unknown',
+            recommended_fertilizer_remark: (recommendation.fertilizer && recommendation.fertilizer.remark) || 'No remark provided',
+        };
+
+        // Save the data and recommendation to Firestore
+        await db.collection('soilData').add({
+            user: userId,
+            location,
+            nitrogen,
+            potassium,
+            phosphorus,
+            humidity,
+            ph,
+            rainfall,
+            moisture,
+            carbon,
+            soil,
+            crop_input,
+            ...validRecommendation, // Spread the validated recommendation
+            timestamp: new Date().toISOString()
         });
 
-        pythonProcess.stderr.on('data', (data) => {
-            errorData += data.toString();
-        });
+        res.json({ recommendation: validRecommendation });
 
-        pythonProcess.on('close', async (code) => {
-            if (code === 0) {
-                try {
-                    const recommendation = JSON.parse(resultData);
-
-                    await db.collection('soilData').add({
-                        user: userId,
-                        location,
-                        nitrogen,
-                        potassium,
-                        phosphorus,
-                        humidity,
-                        rainfall,
-                        recommended_crop: recommendation.crop,
-                        recommended_fertilizer: recommendation.fertilizer,
-                        confidence_score: recommendation.confidence_score,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    res.json({ recommendation });
-                } catch (e) {
-                    console.error('Error parsing Python output or saving to Firestore:', e);
-                    res.status(500).send('Server error processing recommendation.');
-                }
-            } else {
-                console.error(`Python script exited with code ${code}. Error: ${errorData}`);
-                res.status(500).send('Server error running ML model. Details in server logs.');
-            }
-        });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error.');
+        console.error('Error in ML API request:', err.message);
+        res.status(500).send('Server error processing recommendation.');
     }
 };
 

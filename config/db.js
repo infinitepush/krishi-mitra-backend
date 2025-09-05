@@ -1,13 +1,18 @@
 const admin = require("firebase-admin");
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
 const connectDB = () => {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    console.log("✅ Firebase connected successfully!");
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+
+      console.log("✅ Firebase connected successfully!");
+    } catch (error) {
+      console.error("❌ Failed to connect Firebase:", error.message);
+    }
   }
 };
 

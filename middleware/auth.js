@@ -1,22 +1,25 @@
-const jwt = require('jsonwebtoken');
+const admin = require("firebase-admin");
 
-module.exports = function (req, res, next) {
-    // Get token from header
-    const token = req.header('x-auth-token');
+const authMiddleware = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
 
-    // Check if not token
-    if (!token) {
-        return res.status(401).json({ msg: 'No token, authorization denied' });
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ msg: "No token provided" });
     }
 
-    // Verify token
-    try {
-        jwt.verify(token, process.env.JWT_SECRET);
-        // If the token is valid, get the user ID
-        const decoded = jwt.decode(token);
-        req.user = decoded.user;
-        next();
-    } catch (err) {
-        res.status(401).json({ msg: 'Token is not valid' });
-    }
+    const idToken = authHeader.split(" ")[1];
+
+    // Verify the Firebase ID token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+
+    // Attach user data to request
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    console.error("Auth error:", error.message);
+    res.status(401).json({ msg: "Invalid or expired token" });
+  }
 };
+
+module.exports = authMiddleware;
